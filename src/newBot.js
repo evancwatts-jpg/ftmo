@@ -89,6 +89,20 @@ class NewFtmoTradingBot {
     return this.interval !== null;
   }
 
+  setMode(mode, reason = "manual mode change") {
+    if (this.isRunning()) {
+      this.stop(reason);
+    }
+
+    this.config.mode = mode;
+    this.core.commandController.setMode(mode);
+
+    return {
+      mode: this.config.mode,
+      running: this.isRunning()
+    };
+  }
+
   async tick() {
     if (this.config.mode === MODES.OFF) {
       this.logger.log("NO_ACTION", "bot_tick", {

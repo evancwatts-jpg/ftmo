@@ -8,9 +8,11 @@
     "start": "node bin/new-ftmo-bot.js",
     "bot": "node bin/new-ftmo-bot.js",
     "bot:observation": "FTMO_BOT_MODE=OBSERVATION node bin/new-ftmo-bot.js",
+    "web": "node bin/bot-website.js",
     "test": "node --test"
   },
   "bin": {
+    "ftmo-bot-website": "bin/bot-website.js",
     "new-ftmo-bot": "bin/new-ftmo-bot.js"
   },
   "engines": {

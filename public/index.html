@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FTMO Bot Dashboard</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Obedience-first trading system</p>
+        <h1>FTMO Bot Dashboard</h1>
+        <p class="subtitle">
+          Monitor mode, account state, market data, open positions, and audit
+          logs from a browser. Broker writes still go through the bot's live-mode
+          guard.
+        </p>
+      </div>
+      <div class="status-card">
+        <span id="connectionState" class="pill muted">Connecting</span>
+        <strong id="botMode">OFF</strong>
+        <small id="botRunning">Stopped</small>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel controls">
+        <div class="panel-heading">
+          <h2>Command Center</h2>
+          <span class="caption">Manual dashboard controls only</span>
+        </div>
+        <div class="mode-grid">
+          <button data-mode="OFF" class="mode-button">OFF</button>
+          <button data-mode="OBSERVATION" class="mode-button">OBSERVATION</button>
+          <button data-mode="LIVE" class="mode-button danger">LIVE</button>
+        </div>
+        <div class="button-row">
+          <button id="startBot">Start loop</button>
+          <button id="stopBot" class="secondary">Stop loop</button>
+          <button id="manualScan" class="secondary">Manual scan</button>
+        </div>
+        <label class="confirm-live">
+          <input id="confirmLive" type="checkbox">
+          Confirm LIVE manual scan
+        </label>
+        <p id="commandMessage" class="message"></p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Account</h2>
+          <span id="symbol" class="caption">EURUSD</span>
+        </div>
+        <div class="metrics">
+          <div>
+            <span>Balance</span>
+            <strong id="balance">--</strong>
+          </div>
+          <div>
+            <span>Equity</span>
+            <strong id="equity">--</strong>
+          </div>
+          <div>
+            <span>Spread</span>
+            <strong id="spread">--</strong>
+          </div>
+          <div>
+            <span>Price</span>
+            <strong id="price">--</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel wide">
+        <div class="panel-heading">
+          <h2>Configuration</h2>
+          <span class="caption">Read-only safety flags</span>
+        </div>
+        <div id="configGrid" class="config-grid"></div>
+      </section>
+
+      <section class="panel wide">
+        <div class="panel-heading">
+          <h2>Open Positions</h2>
+          <span id="positionCount" class="caption">0 positions</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Entry</th>
+                <th>SL</th>
+                <th>TP</th>
+              </tr>
+            </thead>
+            <tbody id="positionsTable">
+              <tr><td colspan="6">No positions loaded.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel wide">
+        <div class="panel-heading">
+          <h2>Audit Logs</h2>
+          <span class="caption">Latest 50 events</span>
+        </div>
+        <pre id="logs" class="logs">Loading logs...</pre>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
