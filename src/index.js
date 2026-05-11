@@ -10,10 +10,13 @@ module.exports = {
   ...require("./directionValidator"),
   ...require("./executionEngine"),
   ...require("./marketDataEngine"),
+  ...require("./newBot"),
   ...require("./observationSimulator"),
+  ...require("./paperBroker"),
   ...require("./positionManager"),
   ...require("./profitExhaustionDetector"),
   ...require("./riskEngine"),
+  ...require("./runtimeConfig"),
   ...require("./setupStateMachine"),
   ...require("./slTpEngine"),
   ...require("./strategyEngine")

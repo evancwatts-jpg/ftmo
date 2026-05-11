@@ -10,7 +10,9 @@ const {
   DirectionValidator,
   DIRECTIONS,
   ExecutionEngine,
+  NewFtmoTradingBot,
   ORDER_SIDES,
+  PaperBroker,
   PositionManager,
   ProfitExhaustionDetector,
   RiskEngine,
@@ -26,13 +28,32 @@ function createFakeBroker() {
     closePosition: 0,
     partialClose: 0,
     modifyStopLoss: 0,
-    modifyTakeProfit: 0
+    modifyTakeProfit: 0,
+    getAccountInfo: 0,
+    getPrice: 0,
+    getCandles: 0,
+    getOpenPositions: 0
   };
 
   return {
     calls,
     async getAccountInfo() {
+      calls.getAccountInfo += 1;
       return { id: "demo-account" };
+    },
+    async getPrice() {
+      calls.getPrice += 1;
+      return { bid: 1.1, ask: 1.1001 };
+    },
+    async getCandles({ timeframe }) {
+      calls.getCandles += 1;
+      return timeframe === "1m"
+        ? [{ open: 1.1, high: 1.1003, low: 1.0999, close: 1.1001 }]
+        : Array.from({ length: 30 }, () => ({ open: 1.1, high: 1.1004, low: 1.0996, close: 1.1001 }));
+    },
+    async getOpenPositions() {
+      calls.getOpenPositions += 1;
+      return [];
     },
     async placeOrder(order) {
       calls.placeOrder += 1;
@@ -438,4 +459,101 @@ test("1m execution fails when price is chasing too far", () => {
 
   assert.equal(result.passes, false);
   assert.match(result.reason, /40%/);
+});
+
+test("new bot OFF mode does not start scan loop", async () => {
+  const broker = createFakeBroker();
+  const logger = new AuditLogger();
+  const bot = new NewFtmoTradingBot({
+    broker,
+    logger,
+    config: { mode: "OFF" },
+    scanIntervalMs: 10
+  });
+
+  const result = await bot.start();
+
+  assert.equal(result.started, false);
+  assert.equal(bot.isRunning(), false);
+  assert.equal(broker.calls.getCandles, 0);
+});
+
+test("new bot dashboard snapshot is read-only in OFF mode", async () => {
+  const broker = createFakeBroker();
+  const bot = new NewFtmoTradingBot({
+    broker,
+    config: { mode: "OFF" }
+  });
+
+  const snapshot = await bot.getDashboardSnapshot();
+
+  assert.equal(snapshot.mode, "OFF");
+  assert.equal(snapshot.running, false);
+  assert.equal(broker.calls.getAccountInfo, 1);
+  assert.equal(broker.calls.getPrice, 1);
+  assert.equal(broker.calls.getCandles, 2);
+  assert.equal(broker.calls.getOpenPositions, 1);
+  assert.equal(broker.calls.placeOrder, 0);
+});
+
+test("new bot tick fetches market state and delegates scan in observation", async () => {
+  const broker = createFakeBroker();
+  const bot = new NewFtmoTradingBot({
+    broker,
+    config: { mode: "OBSERVATION" }
+  });
+  let delegated = false;
+  bot.core.scanAndMaybeTrade = async ({ market, openPositions }) => {
+    delegated = true;
+    assert.equal(market.symbol, "EURUSD");
+    assert.equal(market.spreadPips, 1);
+    assert.equal(openPositions, 0);
+    return { acted: false, reason: "test delegation" };
+  };
+
+  const result = await bot.tick();
+
+  assert.equal(delegated, true);
+  assert.equal(result.tradeResult.reason, "test delegation");
+  assert.equal(broker.calls.placeOrder, 0);
+});
+
+test("new bot live tick can manage profitable exhaustion through guarded position manager", async () => {
+  const broker = new PaperBroker({
+    positions: [{
+      id: "pos-1",
+      side: "BUY",
+      entry: 1.1,
+      stopLoss: 1.098,
+      tp1Hit: true
+    }],
+    price: { bid: 1.1021, ask: 1.1023 }
+  });
+  const bot = new NewFtmoTradingBot({
+    broker,
+    config: { mode: "LIVE", enableProfitExhaustionExit: true }
+  });
+  bot.core.scanAndMaybeTrade = async () => ({ acted: false, reason: "skip setup scan" });
+  bot.buildReadOnlyState = async () => ({
+    accountInfo: { id: "paper-account" },
+    price: { bid: 1.1021, ask: 1.1023 },
+    candles5m: [],
+    candles1m: [],
+    positions: broker.positions,
+    market: {
+      symbol: "EURUSD",
+      currentPrice: 1.1022,
+      spreadPips: 2,
+      approachesMajorOpposingLiquidity: true,
+      momentumWeakens: true,
+      wickRejectsContinuation: true,
+      chochAgainstPosition: true
+    }
+  });
+
+  const result = await bot.tick();
+
+  assert.equal(result.managementResults.length, 1);
+  assert.equal(broker.writeAttempts.length, 1);
+  assert.equal(broker.writeAttempts[0].action, "closePosition");
 });

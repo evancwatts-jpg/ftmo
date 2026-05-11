@@ -37,7 +37,10 @@ const botConfig = {
 };
 
 function createBotConfig(overrides = {}) {
-  const next = { ...botConfig, ...overrides };
+  const definedOverrides = Object.fromEntries(
+    Object.entries(overrides).filter(([_key, value]) => value !== undefined)
+  );
+  const next = { ...botConfig, ...definedOverrides };
 
   if (!Object.values(MODES).includes(next.mode)) {
     throw new Error(`Invalid bot mode: ${next.mode}`);

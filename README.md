@@ -1,6 +1,6 @@
-# FTMO bot core
+# New FTMO bot
 
-This repository now contains a clean FTMO trading bot core rebuilt around
+This repository now contains a clean, standalone FTMO trading bot rebuilt around
 obedience first:
 
 1. obey mode
@@ -14,8 +14,10 @@ obedience first:
 
 ## Architecture
 
-The bot is split into single-purpose modules under `src/`:
+The bot has a dedicated runtime entrypoint and is split into single-purpose
+modules under `src/`:
 
+- `newBot` - launchable bot runtime with `start`, `stop`, `tick`, and dashboard snapshot
 - `config` - central `botConfig` defaults and account/mode validation
 - `commandController` - mode obedience and universal broker write guard
 - `accountManager` - account presets, broker account reload, transient state reset
@@ -31,6 +33,57 @@ The bot is split into single-purpose modules under `src/`:
 - `profitExhaustionDetector` - scored profit-only exit detection
 - `auditLogger` - structured audit events; no execution side effects
 - `brokerAdapter` - MetaApi/MT5 adapter boundary
+- `paperBroker` - safe local broker for OFF/OBSERVATION smoke runs
+- `runtimeConfig` - environment variable config and broker factory loading
+
+The CLI entrypoint is:
+
+```bash
+npm start
+```
+
+or:
+
+```bash
+node bin/new-ftmo-bot.js
+```
+
+The default mode is `OFF`, so launching the bot without environment variables
+only prints a read-only dashboard snapshot and does not scan or trade.
+
+## Runtime environment
+
+Configure the new bot with environment variables:
+
+```bash
+FTMO_BOT_MODE=OBSERVATION
+FTMO_ACCOUNT_SIZE=25000
+FTMO_RISK_PERCENT=0.25
+FTMO_STRATEGY_MODE=BOTH
+FTMO_SYMBOL=EURUSD
+FTMO_SCAN_INTERVAL_MS=60000
+```
+
+To wire a real MetaApi/MT5 connection, provide a broker factory:
+
+```bash
+FTMO_BROKER_FACTORY=/absolute/path/to/brokerFactory.js npm start
+```
+
+The factory must export `createBroker({ env })` or a default function returning
+an object with these methods:
+
+- `getAccountInfo()`
+- `getPrice(symbol)`
+- `getCandles({ symbol, timeframe, limit })`
+- `getOpenPositions(symbol)`
+- `placeOrder(order)`
+- `closePosition(positionId)`
+- `partialClose(positionId, volume)`
+- `modifyStopLoss(positionId, stopLoss)`
+- `modifyTakeProfit(positionId, takeProfit)`
+
+All write methods still pass through the bot's universal broker write guard.
 
 ## Default config
 
