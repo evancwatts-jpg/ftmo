@@ -53,7 +53,8 @@ class CommandController {
     if (
       lowerReason.includes("daily p&l warning") ||
       lowerReason.includes("daily pnl warning") ||
-      lowerReason.includes("informational warning")
+      lowerReason.includes("informational warning") ||
+      lowerReason.includes("dashboard warning")
     ) {
       this.logger.log("BLOCKED", action, {
         reason: reasonText,

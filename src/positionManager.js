@@ -106,6 +106,26 @@ class PositionManager {
   }
 
   canAct(action, reason) {
+    const reasonText = String(reason || "").toLowerCase();
+
+    if (reasonText.includes("daily p&l") && !this.config.enableDailyPnLBlocks) {
+      this.logger.log("BLOCKED", action, {
+        reason,
+        blockReason: "daily P&L blocks are disabled",
+        mode: this.config.mode
+      });
+      return false;
+    }
+
+    if (reasonText.includes("structure") && !this.config.enableStructureExit) {
+      this.logger.log("BLOCKED", action, {
+        reason,
+        blockReason: "structure exits are disabled",
+        mode: this.config.mode
+      });
+      return false;
+    }
+
     return this.commandController.canExecuteBrokerAction(action, reason);
   }
 }
