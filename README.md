@@ -51,6 +51,37 @@ node bin/new-ftmo-bot.js
 The default mode is `OFF`, so launching the bot without environment variables
 only prints a read-only dashboard snapshot and does not scan or trade.
 
+## Website dashboard
+
+Run the browser dashboard with:
+
+```bash
+npm run web
+```
+
+By default it listens on `http://0.0.0.0:3000` and uses the safe paper broker
+unless `FTMO_BROKER_FACTORY` is provided.
+
+Optional website settings:
+
+```bash
+FTMO_WEB_HOST=0.0.0.0
+FTMO_WEB_PORT=3000
+```
+
+Website routes:
+
+- `GET /` - dashboard UI
+- `GET /api/status` - read-only dashboard snapshot
+- `GET /api/config` - sanitized config flags
+- `POST /api/mode` - manual mode switch: `OFF`, `OBSERVATION`, or `LIVE`
+- `POST /api/start` - manually start the scan loop
+- `POST /api/stop` - manually stop the scan loop
+- `POST /api/tick` - manually run one scan
+
+Manual scans in `LIVE` mode require the `x-confirm-live-action: true` header.
+The website never bypasses the command controller or broker write guard.
+
 ## Runtime environment
 
 Configure the new bot with environment variables:

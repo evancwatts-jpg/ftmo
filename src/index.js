@@ -19,5 +19,6 @@ module.exports = {
   ...require("./runtimeConfig"),
   ...require("./setupStateMachine"),
   ...require("./slTpEngine"),
-  ...require("./strategyEngine")
+  ...require("./strategyEngine"),
+  ...require("./webServer")
 };

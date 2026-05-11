@@ -6,6 +6,7 @@ const assert = require("node:assert/strict");
 const {
   AccountManager,
   AuditLogger,
+  BotWebServer,
   CommandController,
   DirectionValidator,
   DIRECTIONS,
@@ -518,6 +519,19 @@ test("new bot tick fetches market state and delegates scan in observation", asyn
   assert.equal(broker.calls.placeOrder, 0);
 });
 
+test("new bot mode changes keep runtime and core command controller synchronized", () => {
+  const bot = new NewFtmoTradingBot({
+    broker: createFakeBroker(),
+    config: { mode: "OFF" }
+  });
+
+  const result = bot.setMode("OBSERVATION", "test mode change");
+
+  assert.equal(result.mode, "OBSERVATION");
+  assert.equal(bot.config.mode, "OBSERVATION");
+  assert.equal(bot.core.config.mode, "OBSERVATION");
+});
+
 test("new bot live tick can manage profitable exhaustion through guarded position manager", async () => {
   const broker = new PaperBroker({
     positions: [{
@@ -556,4 +570,96 @@ test("new bot live tick can manage profitable exhaustion through guarded positio
   assert.equal(result.managementResults.length, 1);
   assert.equal(broker.writeAttempts.length, 1);
   assert.equal(broker.writeAttempts[0].action, "closePosition");
+});
+
+test("website serves dashboard and read-only status API", async () => {
+  const broker = createFakeBroker();
+  const bot = new NewFtmoTradingBot({
+    broker,
+    config: { mode: "OFF" }
+  });
+  const webServer = new BotWebServer({
+    bot,
+    host: "127.0.0.1",
+    port: 0
+  });
+
+  const started = await webServer.start();
+  const baseUrl = `http://127.0.0.1:${started.address.port}`;
+
+  try {
+    const page = await fetch(`${baseUrl}/`);
+    const status = await fetch(`${baseUrl}/api/status`);
+    const statusBody = await status.json();
+
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /FTMO Bot Dashboard/);
+    assert.equal(status.status, 200);
+    assert.equal(statusBody.mode, "OFF");
+    assert.equal(broker.calls.placeOrder, 0);
+    assert.equal(broker.calls.closePosition, 0);
+  } finally {
+    await webServer.stop();
+  }
+});
+
+test("website mode API switches mode and stops running loop", async () => {
+  const bot = new NewFtmoTradingBot({
+    broker: createFakeBroker(),
+    config: { mode: "OBSERVATION" }
+  });
+  const webServer = new BotWebServer({
+    bot,
+    host: "127.0.0.1",
+    port: 0
+  });
+
+  const started = await webServer.start();
+  const baseUrl = `http://127.0.0.1:${started.address.port}`;
+
+  try {
+    await bot.start({ runImmediately: false });
+    assert.equal(bot.isRunning(), true);
+
+    const response = await fetch(`${baseUrl}/api/mode`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "OFF" })
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.mode, "OFF");
+    assert.equal(body.running, false);
+    assert.equal(bot.isRunning(), false);
+  } finally {
+    await webServer.stop();
+  }
+});
+
+test("website blocks LIVE manual scan without explicit confirmation header", async () => {
+  const broker = createFakeBroker();
+  const bot = new NewFtmoTradingBot({
+    broker,
+    config: { mode: "LIVE" }
+  });
+  const webServer = new BotWebServer({
+    bot,
+    host: "127.0.0.1",
+    port: 0
+  });
+
+  const started = await webServer.start();
+  const baseUrl = `http://127.0.0.1:${started.address.port}`;
+
+  try {
+    const response = await fetch(`${baseUrl}/api/tick`, { method: "POST" });
+    const body = await response.json();
+
+    assert.equal(response.status, 409);
+    assert.match(body.error, /requires/);
+    assert.equal(broker.calls.placeOrder, 0);
+  } finally {
+    await webServer.stop();
+  }
 });
