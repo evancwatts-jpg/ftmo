@@ -5,11 +5,12 @@
   "type": "commonjs",
   "description": "Config-driven FTMO trading bot core focused on obedience, risk control, and clean execution.",
   "scripts": {
-    "start": "node bin/new-ftmo-bot.js",
-    "bot": "node bin/new-ftmo-bot.js",
-    "bot:observation": "FTMO_BOT_MODE=OBSERVATION node bin/new-ftmo-bot.js",
-    "web": "node bin/bot-website.js",
-    "test": "node --test"
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && node bin/new-ftmo-bot.js",
+    "bot": "npm run build && node bin/new-ftmo-bot.js",
+    "bot:observation": "npm run build && FTMO_BOT_MODE=OBSERVATION node bin/new-ftmo-bot.js",
+    "web": "npm run build && node bin/bot-website.js",
+    "test": "npm run build && node --test"
   },
   "bin": {
     "ftmo-bot-website": "bin/bot-website.js",
@@ -17,5 +18,9 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^25.7.0",
+    "typescript": "^6.0.3"
   }
 }

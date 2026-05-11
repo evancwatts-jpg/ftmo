@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 "use strict";
 
-const { AuditLogger } = require("../src/auditLogger");
-const { BotWebServer } = require("../src/webServer");
-const { NewFtmoTradingBot } = require("../src/newBot");
-const { createBrokerFromEnv, loadConfigFromEnv, parseNumber } = require("../src/runtimeConfig");
+const {
+  AuditLogger,
+  BotWebServer,
+  NewFtmoTradingBot,
+  createBrokerFromEnv,
+  loadConfigFromEnv,
+  parseNumber
+} = require("../dist/server/bot");
 
 async function main() {
   const logger = new AuditLogger({
