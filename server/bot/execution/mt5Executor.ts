@@ -1,12 +1,24 @@
-"use strict";
+import type { OrderSide } from "../strategy/strategyTypes";
 
-class MetaApiBrokerAdapter {
-  constructor({ connection, account }) {
+export interface BrokerOrder {
+  symbol: "EURUSD";
+  orderSide: OrderSide;
+  lotSize: number;
+  stopLoss: number;
+  tp2: number;
+  comment?: string;
+}
+
+export class MetaApiBrokerAdapter {
+  connection: any;
+  account: any;
+
+  constructor({ connection, account }: { connection: any; account?: any }) {
     this.connection = connection;
     this.account = account;
   }
 
-  async getAccountInfo() {
+  getAccountInfo(): Promise<unknown> {
     if (this.account && typeof this.account.getAccountInformation === "function") {
       return this.account.getAccountInformation();
     }
@@ -14,20 +26,22 @@ class MetaApiBrokerAdapter {
     return this.connection.getAccountInformation();
   }
 
-  async getPrice(symbol) {
+  getPrice(symbol: string): Promise<Record<string, number>> {
     return this.connection.getSymbolPrice(symbol);
   }
 
-  async getCandles({ symbol, timeframe, limit }) {
+  getCandles({ symbol, timeframe, limit }: { symbol: string; timeframe: string; limit?: number }): Promise<unknown[]> {
     return this.connection.getHistoricalCandles(symbol, timeframe, undefined, limit);
   }
 
-  async getOpenPositions(symbol) {
+  async getOpenPositions(symbol?: string): Promise<unknown[]> {
     const positions = await this.connection.getPositions();
-    return symbol ? positions.filter((position) => position.symbol === symbol) : positions;
+    return symbol
+      ? positions.filter((position: Record<string, unknown>) => position.symbol === symbol)
+      : positions;
   }
 
-  async placeOrder(order) {
+  placeOrder(order: BrokerOrder): Promise<unknown> {
     if (order.orderSide === "BUY") {
       return this.connection.createMarketBuyOrder(order.symbol, order.lotSize, order.stopLoss, order.tp2, {
         comment: order.comment || "ftmo-rebuild"
@@ -39,23 +53,19 @@ class MetaApiBrokerAdapter {
     });
   }
 
-  async closePosition(positionId) {
+  closePosition(positionId: string): Promise<unknown> {
     return this.connection.closePosition(positionId);
   }
 
-  async partialClose(positionId, volume) {
+  partialClose(positionId: string, volume: number): Promise<unknown> {
     return this.connection.closePositionPartially(positionId, volume);
   }
 
-  async modifyStopLoss(positionId, stopLoss) {
+  modifyStopLoss(positionId: string, stopLoss: number): Promise<unknown> {
     return this.connection.modifyPosition(positionId, stopLoss, undefined);
   }
 
-  async modifyTakeProfit(positionId, takeProfit) {
+  modifyTakeProfit(positionId: string, takeProfit: number): Promise<unknown> {
     return this.connection.modifyPosition(positionId, undefined, takeProfit);
   }
 }
-
-module.exports = {
-  MetaApiBrokerAdapter
-};

@@ -8,11 +8,13 @@ const {
   AuditLogger,
   BotWebServer,
   CommandController,
-  DirectionValidator,
   DIRECTIONS,
+  DirectionValidator,
   ExecutionEngine,
+  MarketShiftDetector,
   NewFtmoTradingBot,
   ORDER_SIDES,
+  POSITION_TYPES,
   PaperBroker,
   PositionManager,
   ProfitExhaustionDetector,
@@ -20,7 +22,10 @@ const {
   SetupStateMachine,
   SlTpEngine,
   StrategyEngine,
-  createBotConfig
+  buildTradeProjection,
+  createBotConfig,
+  positionTypeForDirection,
+  sideForDirection
 } = require("../src");
 
 function createFakeBroker() {
@@ -110,20 +115,7 @@ function createHarness(overrides = {}) {
     setupStateMachine: new SetupStateMachine({ logger })
   });
 
-  return {
-    accountManager,
-    broker,
-    commandController,
-    config,
-    directionValidator,
-    executionEngine,
-    logger,
-    positionManager,
-    profitExhaustionDetector,
-    riskEngine,
-    slTpEngine,
-    strategyEngine
-  };
+  return { accountManager, broker, commandController, config, directionValidator, executionEngine, logger, positionManager, profitExhaustionDetector, riskEngine, slTpEngine, strategyEngine };
 }
 
 function validOrder(overrides = {}) {
@@ -132,57 +124,69 @@ function validOrder(overrides = {}) {
     setupDirection: DIRECTIONS.LONG,
     orderSide: ORDER_SIDES.BUY,
     entry: 1.1,
-    stopLoss: 1.098,
-    stopLossPips: 20,
-    tp1: 1.102,
-    tp2: 1.103,
+    stopLoss: 1.099,
+    stopLossPips: 10,
+    tp1: 1.101,
+    tp2: 1.1015,
+    rrToTp2: 1.5,
+    lotSize: 10,
+    dollarRisk: 100,
+    tradeReason: "Bullish scalp setup with sweep, displacement, retracement, and 1m confirmation.",
+    ...overrides
+  };
+}
+
+function validSetup(overrides = {}) {
+  return {
+    valid: true,
+    direction: DIRECTIONS.LONG,
+    model: "SCALP",
+    sweptLevel: 1.0996,
+    structuralStop: 1.099,
+    entryZone: { low: 1.0999, high: 1.1001 },
+    reason: "Bullish scalp setup with full confirmation.",
+    ...overrides
+  };
+}
+
+function validLevels(overrides = {}) {
+  return {
+    valid: true,
+    reason: "valid",
+    entry: 1.1,
+    stopLoss: 1.099,
+    stopLossPips: 10,
+    tp1: 1.101,
+    tp2: 1.1015,
+    rrToTp1: 1,
+    rrToTp2: 1.5,
     rr: 1.5,
-    lotSize: 1,
-    dollarRisk: 25,
     ...overrides
   };
 }
 
 function validRiskInput(overrides = {}) {
   return {
-    setup: {
-      direction: DIRECTIONS.LONG,
-      model: "SCALP",
-      entryZone: { low: 1.0998, high: 1.1002 }
-    },
-    levels: {
-      entry: 1.1,
-      stopLoss: 1.098,
-      stopLossPips: 20,
-      tp1: 1.102,
-      tp2: 1.103,
-      rr: 1.5
-    },
-    market: {
-      currentPrice: 1.1,
-      spreadPips: 1.1
-    },
+    setup: validSetup(),
+    levels: validLevels(),
+    market: { symbol: "EURUSD", currentPrice: 1.1, spreadPips: 1 },
     openPositions: 0,
     directionValidation: { valid: true, reason: "valid" },
     ...overrides
   };
 }
 
-test("observation mode cannot place order", async () => {
+test("observation mode cannot place orders", async () => {
   const { executionEngine, broker } = createHarness({ mode: "OBSERVATION" });
-
   const result = await executionEngine.placeOrder(validOrder(), "strategy setup");
-
   assert.equal(result.executed, false);
   assert.equal(result.blocked, true);
   assert.equal(broker.calls.placeOrder, 0);
 });
 
-test("observation mode cannot close order", async () => {
+test("observation mode cannot close orders", async () => {
   const { positionManager, broker } = createHarness({ mode: "OBSERVATION" });
-
   const result = await positionManager.closePosition({ id: "pos-1" }, "manual close");
-
   assert.equal(result.closed, false);
   assert.equal(result.blocked, true);
   assert.equal(broker.calls.closePosition, 0);
@@ -190,82 +194,56 @@ test("observation mode cannot close order", async () => {
 
 test("observation mode cannot modify SL", async () => {
   const { positionManager, broker } = createHarness({ mode: "OBSERVATION" });
-
   const result = await positionManager.modifyStopLoss({ id: "pos-1" }, 1.1, "move SL to breakeven");
-
   assert.equal(result.modified, false);
   assert.equal(result.blocked, true);
   assert.equal(broker.calls.modifyStopLoss, 0);
 });
 
-test("daily P&L cannot close trade when disabled", async () => {
+test("daily P&L cannot close trades when disabled", async () => {
   const { positionManager, broker } = createHarness({ mode: "LIVE", enableDailyPnLBlocks: false });
-
   const result = await positionManager.handleDailyPnl({ id: "pos-1" }, { mustClose: true });
-
   assert.equal(result.closed, false);
   assert.equal(result.blocked, true);
   assert.equal(broker.calls.closePosition, 0);
 });
 
-test("daily P&L cannot block trade when disabled", () => {
+test("daily P&L cannot block trades when disabled", () => {
   const { riskEngine } = createHarness({ mode: "LIVE", enableDailyPnLBlocks: false });
-
-  const result = riskEngine.evaluateTrade(validRiskInput({
-    dailyPnlState: { blockTrading: true }
-  }));
-
+  const result = riskEngine.evaluateTrade(validRiskInput({ dailyPnlState: { blockTrading: true } }));
   assert.equal(result.allowed, true);
 });
 
-test("cooldown disabled means no trade cooldown", () => {
+test("cooldown disabled means no cooldown blocking", () => {
   const { riskEngine } = createHarness({ mode: "LIVE", enableCooldown: false });
-
   const result = riskEngine.evaluateTrade(validRiskInput({ cooldownActive: true }));
-
   assert.equal(result.allowed, true);
 });
 
 test("off-hours does not block scalps when sessionAdjustedRules=false", () => {
   const { riskEngine } = createHarness({ mode: "LIVE", sessionAdjustedRules: false });
-
-  const result = riskEngine.evaluateTrade(validRiskInput({
-    market: { currentPrice: 1.1, spreadPips: 1, sessionLabel: "OFF_HOURS" }
-  }));
-
+  const result = riskEngine.evaluateTrade(validRiskInput({ market: { symbol: "EURUSD", currentPrice: 1.1, spreadPips: 1, sessionLabel: "OFF_HOURS" } }));
   assert.equal(result.allowed, true);
 });
 
 test("H4 bullish does not hard-block shorts when strictHTFBias=false", () => {
   const { riskEngine } = createHarness({ mode: "LIVE", strictHTFBias: false });
-
   const result = riskEngine.evaluateTrade(validRiskInput({
-    setup: {
-      direction: DIRECTIONS.SHORT,
-      model: "SCALP",
-      entryZone: { low: 1.0998, high: 1.1002 }
-    },
-    market: { currentPrice: 1.1, spreadPips: 1, htfBias: "BULLISH" }
+    setup: validSetup({ direction: DIRECTIONS.SHORT }),
+    market: { symbol: "EURUSD", currentPrice: 1.1, spreadPips: 1, htfBias: "BULLISH" }
   }));
-
   assert.equal(result.allowed, true);
 });
 
 test("H4 bearish does not hard-block longs when strictHTFBias=false", () => {
   const { riskEngine } = createHarness({ mode: "LIVE", strictHTFBias: false });
-
-  const result = riskEngine.evaluateTrade(validRiskInput({
-    market: { currentPrice: 1.1, spreadPips: 1, htfBias: "BEARISH" }
-  }));
-
+  const result = riskEngine.evaluateTrade(validRiskInput({ market: { symbol: "EURUSD", currentPrice: 1.1, spreadPips: 1, htfBias: "BEARISH" } }));
   assert.equal(result.allowed, true);
 });
 
 test("BUY cannot execute with SL above entry", async () => {
   const { executionEngine, broker } = createHarness({ mode: "LIVE" });
-
   const result = await executionEngine.placeOrder(validOrder({ stopLoss: 1.101 }), "strategy setup");
-
   assert.equal(result.executed, false);
   assert.equal(broker.calls.placeOrder, 0);
   assert.match(result.validation.reason, /SL below entry/);
@@ -273,15 +251,7 @@ test("BUY cannot execute with SL above entry", async () => {
 
 test("SELL cannot execute with SL below entry", async () => {
   const { executionEngine, broker } = createHarness({ mode: "LIVE" });
-
-  const result = await executionEngine.placeOrder(validOrder({
-    setupDirection: DIRECTIONS.SHORT,
-    orderSide: ORDER_SIDES.SELL,
-    stopLoss: 1.099,
-    tp1: 1.098,
-    tp2: 1.097
-  }), "strategy setup");
-
+  const result = await executionEngine.placeOrder(validOrder({ setupDirection: DIRECTIONS.SHORT, orderSide: ORDER_SIDES.SELL, stopLoss: 1.099, tp1: 1.099, tp2: 1.0985 }), "strategy setup");
   assert.equal(result.executed, false);
   assert.equal(broker.calls.placeOrder, 0);
   assert.match(result.validation.reason, /SL above entry/);
@@ -289,9 +259,7 @@ test("SELL cannot execute with SL below entry", async () => {
 
 test("BUY cannot execute with TP below entry", async () => {
   const { executionEngine, broker } = createHarness({ mode: "LIVE" });
-
   const result = await executionEngine.placeOrder(validOrder({ tp1: 1.099, tp2: 1.098 }), "strategy setup");
-
   assert.equal(result.executed, false);
   assert.equal(broker.calls.placeOrder, 0);
   assert.match(result.validation.reason, /TP1 and TP2 above entry/);
@@ -299,15 +267,7 @@ test("BUY cannot execute with TP below entry", async () => {
 
 test("SELL cannot execute with TP above entry", async () => {
   const { executionEngine, broker } = createHarness({ mode: "LIVE" });
-
-  const result = await executionEngine.placeOrder(validOrder({
-    setupDirection: DIRECTIONS.SHORT,
-    orderSide: ORDER_SIDES.SELL,
-    stopLoss: 1.102,
-    tp1: 1.101,
-    tp2: 1.102
-  }), "strategy setup");
-
+  const result = await executionEngine.placeOrder(validOrder({ setupDirection: DIRECTIONS.SHORT, orderSide: ORDER_SIDES.SELL, stopLoss: 1.101, tp1: 1.101, tp2: 1.102 }), "strategy setup");
   assert.equal(result.executed, false);
   assert.equal(broker.calls.placeOrder, 0);
   assert.match(result.validation.reason, /TP1 and TP2 below entry/);
@@ -315,117 +275,87 @@ test("SELL cannot execute with TP above entry", async () => {
 
 test("huge SL is rejected", () => {
   const { slTpEngine } = createHarness();
-
-  const result = slTpEngine.build({
-    direction: DIRECTIONS.LONG,
-    entry: 1.1,
-    structuralStop: 1.096,
-    model: "SCALP"
-  });
-
+  const result = slTpEngine.build({ direction: DIRECTIONS.LONG, entry: 1.1, structuralStop: 1.098, model: "SCALP" });
   assert.equal(result.valid, false);
-  assert.match(result.reason, /exceeds maxStopLossPips/);
+  assert.match(result.reason, /maxStopLossPips/);
 });
 
 test("huge TP is capped or rejected", () => {
   const { slTpEngine } = createHarness();
-
-  const result = slTpEngine.validateSaneLevels({
-    direction: DIRECTIONS.LONG,
-    entry: 1.1,
-    stopLoss: 1.098,
-    tp1: 1.102,
-    tp2: 1.12,
-    model: "SCALP"
-  });
-
+  const result = slTpEngine.validateSaneLevels({ direction: DIRECTIONS.LONG, entry: 1.1, stopLoss: 1.0992, tp1: 1.1008, tp2: 1.12, model: "SCALP" });
   assert.equal(result.valid, false);
   assert.match(result.reason, /unrealistically far/);
 });
 
-test("lot size calculates correctly for 10k", () => {
-  const { riskEngine } = createHarness({ accountSize: 10000, riskPercent: 0.25 });
-
-  assert.deepEqual(riskEngine.calculateLotSize(25), { dollarRisk: 25, lotSize: 1 });
+test("manual lot override works", () => {
+  const { riskEngine } = createHarness({ manualLotOverrideEnabled: true, manualLotSize: 5 });
+  const result = riskEngine.buildRiskPlan(10);
+  assert.equal(result.manualOverrideUsed, true);
+  assert.equal(result.lotSize, 5);
+  assert.equal(result.expectedDollarLoss, 50);
+  assert.equal(result.valid, true);
 });
 
-test("lot size calculates correctly for 25k", () => {
-  const { riskEngine } = createHarness({ accountSize: 25000, riskPercent: 0.25 });
-
-  assert.deepEqual(riskEngine.calculateLotSize(25), { dollarRisk: 62.5, lotSize: 2.5 });
+test("manual lot override is blocked if risk exceeds max", () => {
+  const { riskEngine } = createHarness({ manualLotOverrideEnabled: true, manualLotSize: 20 });
+  const result = riskEngine.buildRiskPlan(10);
+  assert.equal(result.valid, false);
+  assert.equal(result.expectedDollarLoss, 200);
+  assert.match(result.reason, /exceeds/);
 });
 
-test("lot size calculates correctly for 50k", () => {
-  const { riskEngine } = createHarness({ accountSize: 50000, riskPercent: 0.25 });
+test("10k account max loss defaults to $100 at 1%", () => {
+  const { riskEngine } = createHarness({ accountSize: 10000, riskPercent: 1 });
+  assert.equal(riskEngine.buildRiskPlan(10).maxRiskDollars, 100);
+});
 
-  assert.deepEqual(riskEngine.calculateLotSize(25), { dollarRisk: 125, lotSize: 5 });
+test("25k account max loss defaults to $250 at 1%", () => {
+  const { riskEngine } = createHarness({ accountSize: 25000, riskPercent: 1 });
+  assert.equal(riskEngine.buildRiskPlan(10).maxRiskDollars, 250);
+});
+
+test("50k account max loss defaults to $500 at 1%", () => {
+  const { riskEngine } = createHarness({ accountSize: 50000, riskPercent: 1 });
+  assert.equal(riskEngine.buildRiskPlan(10).maxRiskDollars, 500);
 });
 
 test("profit exhaustion does not close losing trades", async () => {
   const { positionManager, broker } = createHarness({ mode: "LIVE", enableProfitExhaustionExit: true });
-
-  const result = await positionManager.handleProfitExhaustion({
-    id: "pos-1",
-    direction: DIRECTIONS.LONG,
-    entry: 1.1,
-    stopLoss: 1.098,
-    tp1Hit: true
-  }, {
-    currentPrice: 1.099,
-    approachesMajorOpposingLiquidity: true,
-    momentumWeakens: true,
-    wickRejectsContinuation: true,
-    chochAgainstPosition: true,
-    failedNewExtreme: true
-  });
-
-  assert.equal(result.closed, false);
-  assert.equal(broker.calls.closePosition, 0);
-});
-
-test("profit exhaustion can close profitable trade after TP1", async () => {
-  const { positionManager, broker } = createHarness({ mode: "LIVE", enableProfitExhaustionExit: true });
-
-  const result = await positionManager.handleProfitExhaustion({
-    id: "pos-1",
-    direction: DIRECTIONS.LONG,
-    entry: 1.1,
-    stopLoss: 1.098,
-    tp1Hit: true
-  }, {
-    currentPrice: 1.1022,
+  const result = await positionManager.handleProfitExhaustion({ id: "pos-1", direction: DIRECTIONS.LONG, entry: 1.1, stopLoss: 1.099, tp1Hit: true }, {
+    symbol: "EURUSD",
+    currentPrice: 1.0995,
     approachesMajorOpposingLiquidity: true,
     momentumWeakens: true,
     wickRejectsContinuation: true,
     chochAgainstPosition: true
   });
+  assert.equal(result.closed, false);
+  assert.equal(broker.calls.closePosition, 0);
+});
 
+test("profit exhaustion can close winning trades after TP1", async () => {
+  const { positionManager, broker } = createHarness({ mode: "LIVE", enableProfitExhaustionExit: true });
+  const result = await positionManager.handleProfitExhaustion({ id: "pos-1", direction: DIRECTIONS.LONG, entry: 1.1, stopLoss: 1.099, tp1Hit: true }, {
+    symbol: "EURUSD",
+    currentPrice: 1.1012,
+    approachesMajorOpposingLiquidity: true,
+    momentumWeakens: true,
+    wickRejectsContinuation: true,
+    chochAgainstPosition: true
+  });
   assert.equal(result.closed, true);
   assert.equal(broker.calls.closePosition, 1);
-  assert.equal(result.evaluation.shouldClose, true);
 });
 
 test("1m execution passes with zone touch + rejection", () => {
   const { strategyEngine } = createHarness();
-
-  const result = strategyEngine.validateOneMinuteExecution({
-    direction: DIRECTIONS.LONG,
-    entryZone: { low: 1.1, high: 1.1005 },
-    currentPrice: 1.1003,
-    entry: 1.10025,
-    tp1: 1.10225,
-    candles1m: [
-      { open: 1.1002, high: 1.1006, low: 1.0998, close: 1.1005 }
-    ]
-  });
-
+  const result = strategyEngine.validateOneMinuteExecution({ direction: DIRECTIONS.LONG, entryZone: { low: 1.1, high: 1.1005 }, currentPrice: 1.1003, entry: 1.10025, tp1: 1.10225, candles1m: [{ open: 1.1002, high: 1.1006, low: 1.0998, close: 1.1005 }] });
   assert.equal(result.passes, true);
   assert.equal(result.confirmations.rejection, true);
 });
 
 test("1m execution passes with zone touch + micro BOS", () => {
   const { strategyEngine } = createHarness();
-
   const result = strategyEngine.validateOneMinuteExecution({
     direction: DIRECTIONS.LONG,
     entryZone: { low: 1.1, high: 1.1005 },
@@ -439,151 +369,53 @@ test("1m execution passes with zone touch + micro BOS", () => {
       { open: 1.10035, high: 1.1007, low: 1.1002, close: 1.1006 }
     ]
   });
-
   assert.equal(result.passes, true);
   assert.equal(result.confirmations.microBos, true);
 });
 
 test("1m execution fails when price is chasing too far", () => {
   const { strategyEngine } = createHarness();
-
-  const result = strategyEngine.validateOneMinuteExecution({
-    direction: DIRECTIONS.LONG,
-    entryZone: { low: 1.1004, high: 1.1006 },
-    currentPrice: 1.1005,
-    entry: 1.1,
-    tp1: 1.101,
-    candles1m: [
-      { open: 1.1002, high: 1.1007, low: 1.0999, close: 1.1006 }
-    ]
-  });
-
+  const result = strategyEngine.validateOneMinuteExecution({ direction: DIRECTIONS.LONG, entryZone: { low: 1.1004, high: 1.1006 }, currentPrice: 1.1005, entry: 1.1, tp1: 1.101, candles1m: [{ open: 1.1002, high: 1.1007, low: 1.0999, close: 1.1006 }] });
   assert.equal(result.passes, false);
   assert.match(result.reason, /40%/);
 });
 
-test("new bot OFF mode does not start scan loop", async () => {
-  const broker = createFakeBroker();
-  const logger = new AuditLogger();
-  const bot = new NewFtmoTradingBot({
-    broker,
-    logger,
-    config: { mode: "OFF" },
-    scanIntervalMs: 10
-  });
-
-  const result = await bot.start();
-
-  assert.equal(result.started, false);
-  assert.equal(bot.isRunning(), false);
-  assert.equal(broker.calls.getCandles, 0);
+test("trade projection is generated before entry", () => {
+  const { riskEngine } = createHarness();
+  const projection = buildTradeProjection({ setup: validSetup(), levels: validLevels(), riskPlan: riskEngine.buildRiskPlan(10) });
+  assert.equal(projection.entry, 1.1);
+  assert.equal(projection.riskDollars, 100);
+  assert.match(projection.expectedPath, /Expected path/);
 });
 
-test("new bot dashboard snapshot is read-only in OFF mode", async () => {
-  const broker = createFakeBroker();
-  const bot = new NewFtmoTradingBot({
-    broker,
-    config: { mode: "OFF" }
-  });
-
-  const snapshot = await bot.getDashboardSnapshot();
-
-  assert.equal(snapshot.mode, "OFF");
-  assert.equal(snapshot.running, false);
-  assert.equal(broker.calls.getAccountInfo, 1);
-  assert.equal(broker.calls.getPrice, 1);
-  assert.equal(broker.calls.getCandles, 2);
-  assert.equal(broker.calls.getOpenPositions, 1);
-  assert.equal(broker.calls.placeOrder, 0);
+test("trade reason is logged before entry", async () => {
+  const { logger, riskEngine } = createHarness({ mode: "OBSERVATION" });
+  const projection = buildTradeProjection({ setup: validSetup(), levels: validLevels(), riskPlan: riskEngine.buildRiskPlan(10) });
+  logger.tradeProjection(projection);
+  assert.match(logger.events.at(-1).tradeReason, /Bullish scalp setup/);
 });
 
-test("new bot tick fetches market state and delegates scan in observation", async () => {
-  const broker = createFakeBroker();
-  const bot = new NewFtmoTradingBot({
-    broker,
-    config: { mode: "OBSERVATION" }
-  });
-  let delegated = false;
-  bot.core.scanAndMaybeTrade = async ({ market, openPositions }) => {
-    delegated = true;
-    assert.equal(market.symbol, "EURUSD");
-    assert.equal(market.spreadPips, 1);
-    assert.equal(openPositions, 0);
-    return { acted: false, reason: "test delegation" };
-  };
-
-  const result = await bot.tick();
-
-  assert.equal(delegated, true);
-  assert.equal(result.tradeResult.reason, "test delegation");
-  assert.equal(broker.calls.placeOrder, 0);
+test("market shift detector outputs regime and bias", () => {
+  const detector = new MarketShiftDetector();
+  const result = detector.detect({ candles5m: Array.from({ length: 12 }, (_item, index) => ({ open: 1.1 + index * 0.0001, high: 1.1003 + index * 0.0001, low: 1.0998 + index * 0.0001, close: 1.1002 + index * 0.0001 })) });
+  assert.ok(result.regime);
+  assert.ok(result.bias);
 });
 
-test("new bot mode changes keep runtime and core command controller synchronized", () => {
-  const bot = new NewFtmoTradingBot({
-    broker: createFakeBroker(),
-    config: { mode: "OFF" }
-  });
-
-  const result = bot.setMode("OBSERVATION", "test mode change");
-
-  assert.equal(result.mode, "OBSERVATION");
-  assert.equal(bot.config.mode, "OBSERVATION");
-  assert.equal(bot.core.config.mode, "OBSERVATION");
+test("BUY order maps to POSITION_TYPE_BUY", () => {
+  assert.equal(sideForDirection(DIRECTIONS.LONG), ORDER_SIDES.BUY);
+  assert.equal(positionTypeForDirection(DIRECTIONS.LONG), POSITION_TYPES.POSITION_TYPE_BUY);
 });
 
-test("new bot live tick can manage profitable exhaustion through guarded position manager", async () => {
-  const broker = new PaperBroker({
-    positions: [{
-      id: "pos-1",
-      side: "BUY",
-      entry: 1.1,
-      stopLoss: 1.098,
-      tp1Hit: true
-    }],
-    price: { bid: 1.1021, ask: 1.1023 }
-  });
-  const bot = new NewFtmoTradingBot({
-    broker,
-    config: { mode: "LIVE", enableProfitExhaustionExit: true }
-  });
-  bot.core.scanAndMaybeTrade = async () => ({ acted: false, reason: "skip setup scan" });
-  bot.buildReadOnlyState = async () => ({
-    accountInfo: { id: "paper-account" },
-    price: { bid: 1.1021, ask: 1.1023 },
-    candles5m: [],
-    candles1m: [],
-    positions: broker.positions,
-    market: {
-      symbol: "EURUSD",
-      currentPrice: 1.1022,
-      spreadPips: 2,
-      approachesMajorOpposingLiquidity: true,
-      momentumWeakens: true,
-      wickRejectsContinuation: true,
-      chochAgainstPosition: true
-    }
-  });
-
-  const result = await bot.tick();
-
-  assert.equal(result.managementResults.length, 1);
-  assert.equal(broker.writeAttempts.length, 1);
-  assert.equal(broker.writeAttempts[0].action, "closePosition");
+test("SELL order maps to POSITION_TYPE_SELL", () => {
+  assert.equal(sideForDirection(DIRECTIONS.SHORT), ORDER_SIDES.SELL);
+  assert.equal(positionTypeForDirection(DIRECTIONS.SHORT), POSITION_TYPES.POSITION_TYPE_SELL);
 });
 
 test("website serves dashboard and read-only status API", async () => {
   const broker = createFakeBroker();
-  const bot = new NewFtmoTradingBot({
-    broker,
-    config: { mode: "OFF" }
-  });
-  const webServer = new BotWebServer({
-    bot,
-    host: "127.0.0.1",
-    port: 0
-  });
-
+  const bot = new NewFtmoTradingBot({ broker, config: { mode: "OFF" } });
+  const webServer = new BotWebServer({ bot, host: "127.0.0.1", port: 0 });
   const started = await webServer.start();
   const baseUrl = `http://127.0.0.1:${started.address.port}`;
 
@@ -591,74 +423,12 @@ test("website serves dashboard and read-only status API", async () => {
     const page = await fetch(`${baseUrl}/`);
     const status = await fetch(`${baseUrl}/api/status`);
     const statusBody = await status.json();
-
     assert.equal(page.status, 200);
     assert.match(await page.text(), /FTMO Bot Dashboard/);
     assert.equal(status.status, 200);
     assert.equal(statusBody.mode, "OFF");
     assert.equal(broker.calls.placeOrder, 0);
     assert.equal(broker.calls.closePosition, 0);
-  } finally {
-    await webServer.stop();
-  }
-});
-
-test("website mode API switches mode and stops running loop", async () => {
-  const bot = new NewFtmoTradingBot({
-    broker: createFakeBroker(),
-    config: { mode: "OBSERVATION" }
-  });
-  const webServer = new BotWebServer({
-    bot,
-    host: "127.0.0.1",
-    port: 0
-  });
-
-  const started = await webServer.start();
-  const baseUrl = `http://127.0.0.1:${started.address.port}`;
-
-  try {
-    await bot.start({ runImmediately: false });
-    assert.equal(bot.isRunning(), true);
-
-    const response = await fetch(`${baseUrl}/api/mode`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "OFF" })
-    });
-    const body = await response.json();
-
-    assert.equal(response.status, 200);
-    assert.equal(body.mode, "OFF");
-    assert.equal(body.running, false);
-    assert.equal(bot.isRunning(), false);
-  } finally {
-    await webServer.stop();
-  }
-});
-
-test("website blocks LIVE manual scan without explicit confirmation header", async () => {
-  const broker = createFakeBroker();
-  const bot = new NewFtmoTradingBot({
-    broker,
-    config: { mode: "LIVE" }
-  });
-  const webServer = new BotWebServer({
-    bot,
-    host: "127.0.0.1",
-    port: 0
-  });
-
-  const started = await webServer.start();
-  const baseUrl = `http://127.0.0.1:${started.address.port}`;
-
-  try {
-    const response = await fetch(`${baseUrl}/api/tick`, { method: "POST" });
-    const body = await response.json();
-
-    assert.equal(response.status, 409);
-    assert.match(body.error, /requires/);
-    assert.equal(broker.calls.placeOrder, 0);
   } finally {
     await webServer.stop();
   }

@@ -1,11 +1,9 @@
-"use strict";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { createBotConfig } from "./config/botConfig";
+import { PaperBroker } from "./execution/paperBroker";
 
-const path = require("node:path");
-const { pathToFileURL } = require("node:url");
-const { createBotConfig } = require("./config");
-const { PaperBroker } = require("./paperBroker");
-
-function parseBoolean(value, fallback) {
+export function parseBoolean(value: string | undefined, fallback?: boolean): boolean | undefined {
   if (value === undefined) {
     return fallback;
   }
@@ -13,7 +11,7 @@ function parseBoolean(value, fallback) {
   return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
 }
 
-function parseNumber(value, fallback) {
+export function parseNumber(value: string | undefined, fallback?: number): number | undefined {
   if (value === undefined || value === "") {
     return fallback;
   }
@@ -26,12 +24,15 @@ function parseNumber(value, fallback) {
   return parsed;
 }
 
-function loadConfigFromEnv(env = process.env) {
+export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env) {
   return createBotConfig({
-    mode: env.FTMO_BOT_MODE || undefined,
-    accountSize: parseNumber(env.FTMO_ACCOUNT_SIZE, undefined),
+    mode: env.FTMO_BOT_MODE as any || undefined,
+    symbol: env.FTMO_SYMBOL as any || undefined,
+    accountSize: parseNumber(env.FTMO_ACCOUNT_SIZE, undefined) as any,
     riskPercent: parseNumber(env.FTMO_RISK_PERCENT, undefined),
-    strategyMode: env.FTMO_STRATEGY_MODE || undefined,
+    manualLotOverrideEnabled: parseBoolean(env.FTMO_MANUAL_LOT_OVERRIDE_ENABLED, undefined),
+    manualLotSize: parseNumber(env.FTMO_MANUAL_LOT_SIZE, undefined) as any,
+    strategyMode: env.FTMO_STRATEGY_MODE as any || undefined,
     trade24Five: parseBoolean(env.FTMO_TRADE_24_FIVE, undefined),
     sessionAdjustedRules: parseBoolean(env.FTMO_SESSION_ADJUSTED_RULES, undefined),
     strictHTFBias: parseBoolean(env.FTMO_STRICT_HTF_BIAS, undefined),
@@ -51,7 +52,7 @@ function loadConfigFromEnv(env = process.env) {
   });
 }
 
-async function createBrokerFromEnv(env = process.env) {
+export async function createBrokerFromEnv(env: NodeJS.ProcessEnv = process.env): Promise<any> {
   if (env.FTMO_BROKER_FACTORY) {
     const factoryPath = path.resolve(env.FTMO_BROKER_FACTORY);
     const brokerModule = await import(pathToFileURL(factoryPath).href);
@@ -66,10 +67,3 @@ async function createBrokerFromEnv(env = process.env) {
 
   return new PaperBroker();
 }
-
-module.exports = {
-  createBrokerFromEnv,
-  loadConfigFromEnv,
-  parseBoolean,
-  parseNumber
-};

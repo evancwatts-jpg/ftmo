@@ -15,26 +15,19 @@ obedience first:
 ## Architecture
 
 The bot has a dedicated runtime entrypoint and is split into single-purpose
-modules under `src/`:
+TypeScript services under `server/bot/`:
 
-- `newBot` - launchable bot runtime with `start`, `stop`, `tick`, and dashboard snapshot
-- `config` - central `botConfig` defaults and account/mode validation
-- `commandController` - mode obedience and universal broker write guard
-- `accountManager` - account presets, broker account reload, transient state reset
-- `marketDataEngine` - read-only account, price, candle, position, and spread helpers
-- `strategyEngine` - scalp/sniper setup detection and 1m execution confirmation
-- `setupStateMachine` - sweep -> displacement -> retracement -> execution states
-- `riskEngine` - spread/news/open-position/RR checks and lot sizing
-- `slTpEngine` - capped risk-first SL/TP construction and sanity validation
-- `directionValidator` - LONG/BUY and SHORT/SELL orientation enforcement
-- `executionEngine` - only module that places new broker orders
-- `positionManager` - approved close/partial/modify/profit-protection writes
-- `observationSimulator` - hypothetical trades only; never touches the broker
-- `profitExhaustionDetector` - scored profit-only exit detection
-- `auditLogger` - structured audit events; no execution side effects
-- `brokerAdapter` - MetaApi/MT5 adapter boundary
-- `paperBroker` - safe local broker for OFF/OBSERVATION smoke runs
-- `runtimeConfig` - environment variable config and broker factory loading
+- `config/botConfig` - central defaults and account/mode validation
+- `core/commandController` - mode obedience and universal broker write guard
+- `core/botRunner` - launchable bot runtime with `start`, `stop`, `tick`, and snapshots
+- `account/accountManager` - account presets and broker account verification
+- `market/marketData` - read-only account, price, candle, position, and spread helpers
+- `strategy/*` - scalp/sniper setup detection, state machine, market shift, and 1m timing
+- `risk/*` - lot sizing, SL/TP construction, and direction validation
+- `execution/*` - guarded broker order boundary plus MetaApi and paper adapters
+- `position/*` - approved close/partial/modify/profit-exhaustion management
+- `observation/observationSimulator` - hypothetical trades only; never touches the broker
+- `analytics/*` - trade projection, expectancy, and Monte Carlo simulation
 
 The CLI entrypoint is:
 
@@ -42,14 +35,8 @@ The CLI entrypoint is:
 npm start
 ```
 
-or:
-
-```bash
-node bin/new-ftmo-bot.js
-```
-
-The default mode is `OFF`, so launching the bot without environment variables
-only prints a read-only dashboard snapshot and does not scan or trade.
+The central config defaults to `OBSERVATION`; set `FTMO_BOT_MODE=OFF` when you
+want the CLI to print only a read-only snapshot and exit.
 
 ## Website dashboard
 
@@ -118,9 +105,9 @@ All write methods still pass through the bot's universal broker write guard.
 
 ## Default config
 
-The central config starts in `OFF`, disables daily P&L blocks, disables
-cooldowns, disables structure exits, allows 24/5 trading, and keeps HTF bias
-contextual unless explicitly changed.
+The central config starts in `OBSERVATION`, disables daily P&L blocks, disables
+cooldowns, disables structure exits, allows 24/5 trading, uses 1% default risk
+with a 1% hard cap, and keeps HTF bias contextual unless explicitly changed.
 
 ## Tests
 
